@@ -1,101 +1,86 @@
 import base64
 import io
-import time
+from dotenv import load_dotenv
 import os
 import pdf2image
 import google.generativeai as genai
 import streamlit as st
-from dotenv import load_dotenv
 from PIL import Image
-import pandas as pd
 
-# Charger la clé API
-load_dotenv()
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    st.error("🚨 Clé API Google non trouvée. Vérifiez votre configuration.")
-    st.stop()
-genai.configure(api_key=API_KEY)
-
-# Fonction d'analyse IA
-def get_gemini_response(input_text, pdf_content, prompt):
-    time.sleep(1)  # Éviter le quota API
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content([input_text, pdf_content[0], prompt])
+genai.configure(api_key= os.getenv("GOOGLE_API_KEY"))
+print(os.getenv("GOOGLE_API_KEY"))
+def get_gemini_response(input, pdf_content, prompt) :
+    model=genai.GenerativeModel('gemini-2.0-pro-exp-02-05')
+    response=model.generate_content([input,pdf_content[0],prompt])
     return response.text
 
-# Convertir un PDF en image et encoder en base64
 def input_pdf_setup(uploaded_file):
     if uploaded_file is not None:
-        images = pdf2image.convert_from_bytes(uploaded_file.read())
-        first_page = images[0]
+        ## Convert the PDF to image
+        images=pdf2image.convert_from_bytes(uploaded_file.read())
 
+        first_page=images[0]
+
+        # Convert to bytes
         img_byte_arr = io.BytesIO()
         first_page.save(img_byte_arr, format='JPEG')
         img_byte_arr = img_byte_arr.getvalue()
 
-        return {
-            "mime_type": "image/jpeg",
-            "data": base64.b64encode(img_byte_arr).decode()
-        }
-# 🎨 Interface Streamlit
-st.set_page_config(page_title="BourseAI - Demande de Bourse")
-st.header("📜 Formulaire de Demande de Bourse")
-
-# 📋 Formulaire de candidature
-with st.form("bourse_form"):
-    nom = st.text_input("Nom et Prénom")
-    email = st.text_input("Email")
-    niveau_etudes = st.selectbox("Niveau d'études", ["Bac", "Licence", "Master", "Doctorat"])
-    revenus_famille = st.slider("Revenus familiaux mensuels (en FCFA)", 0, 1000000, step=5000)
-    motivation = st.text_area("Expliquez pourquoi vous méritez cette bourse")
-
-    # 📂 Upload du CV uniquement
-    cv_file = st.file_uploader("📂 Téléchargez votre CV (PDF)", type=["pdf"])
-
-    submit = st.form_submit_button("📊 Soumettre la Candidature")
-
-# 📌 Si le formulaire est soumis
-if submit:
-    if not (nom and email and motivation and cv_file):
-        st.warning("⚠️ Veuillez remplir tous les champs et téléverser le CV.")
+        pdf_parts = [
+            {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(img_byte_arr).decode()  # encode to base64
+            }
+        ]
+        return pdf_parts
     else:
-        st.success("✅ Candidature soumise avec succès !")
+        raise FileNotFoundError("No file uploaded")
+    
 
-        # 📂 Convertir le CV
-        cv_content = input_pdf_setup(cv_file)
+## Streamlit App
 
-        # 📝 Prompt pour l'IA
-        evaluation_prompt = f"""
-        Vous êtes un jury de sélection pour une bourse d'étude. Évaluez cette candidature en fonction des critères suivants :
-        - Niveau d'études : {niveau_etudes}
-        - Revenus familiaux : {revenus_famille} FCFA
-        - Motivation : {motivation}
+st.set_page_config(page_title="ATS Resume EXpert")
+st.header("ATS Tracking System")
+input_text=st.text_area("Job Description: ",key="input")
+uploaded_file=st.file_uploader("Upload your resume(PDF)...",type=["pdf"])
 
-        Analysez le CV et attribuez une note sur 100 avec des recommandations.
-        """
 
-        # 🧠 Analyse IA
-        response = get_gemini_response(motivation, [cv_content], evaluation_prompt)
+if uploaded_file is not None:
+    st.write("PDF Uploaded Successfully")
 
-        # 📊 Résultat
-        st.subheader("📌 Évaluation de la Candidature")
+
+submit1 = st.button("Tell Me About the Resume")
+
+#submit2 = st.button("How Can I Improvise my Skills")
+
+submit3 = st.button("Percentage match")
+
+input_prompt1 = """
+ You are an experienced Technical Human Resource Manager,your task is to review the provided resume against the job description. 
+  Please share your professional evaluation on whether the candidate's profile aligns with the role. 
+ Highlight the strengths and weaknesses of the applicant in relation to the specified job requirements.
+"""
+
+input_prompt3 = """
+You are an skilled ATS (Applicant Tracking System) scanner with a deep understanding of data science and ATS functionality, 
+your task is to evaluate the resume against the provided job description. give me the percentage of match if the resume matches
+the job description. First the output should come as percentage and then keywords missing and last final thoughts.
+"""
+
+if submit1:
+    if uploaded_file is not None:
+        pdf_content=input_pdf_setup(uploaded_file)
+        response=get_gemini_response(input_prompt1,pdf_content,input_text)
+        st.subheader("The Repsonse is")
         st.write(response)
+    else:
+        st.write("Please uplaod the resume")
 
-        # 🔢 Extraire le score et stocker les résultats (Simulé pour l'instant)
-        score = int(response.split("Note :")[1].split("/")[0]) if "Note :" in response else None
-
-        if score:
-            df = pd.DataFrame([[nom, email, niveau_etudes, revenus_famille, motivation, score]], 
-                              columns=["Nom", "Email", "Niveau", "Revenus", "Motivation", "Score"])
-            df.to_csv("candidatures.csv", mode="a", index=False, header=not os.path.exists("candidatures.csv"))
-            st.success(f"🎯 Score attribué : {score}/100")
-
-# 📊 Classement des candidatures
-st.subheader("🏆 Classement des Candidats")
-if os.path.exists("candidatures.csv"):
-    df_candidatures = pd.read_csv("candidatures.csv")
-    df_candidatures = df_candidatures.sort_values(by="Score", ascending=False)
-    st.dataframe(df_candidatures)
-else:
-    st.info("Aucune candidature enregistrée pour l'instant.")
+elif submit3:
+    if uploaded_file is not None:
+        pdf_content=input_pdf_setup(uploaded_file)
+        response=get_gemini_response(input_prompt3,pdf_content,input_text)
+        st.subheader("The Repsonse is")
+        st.write(response)
+    else:
+        st.write("Please uplaod the resume")
